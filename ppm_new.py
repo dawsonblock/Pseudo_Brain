@@ -37,9 +37,16 @@ class StaticPseudoModeMemory(nn.Module):
         # Pre-allocate all tensors
         self.mu = nn.Parameter(torch.zeros(max_modes, latent_dim, device=device))
         self.w = nn.Parameter(torch.ones(max_modes, device=device))
-        self.lambda_i = nn.Parameter(torch.ones(max_modes, device=device))
-        self.rho_i = nn.Parameter(torch.ones(max_modes, device=device))
-        self.eta_i = nn.Parameter(torch.ones(max_modes, device=device))
+        # Use Buffers (not Parameters) for dynamics - safe for in-place ops
+        self.register_buffer('lambda_i', torch.ones(max_modes, device=device))
+        # Spectral parameters for pseudomode decay
+        self.register_buffer(
+            'gamma_i', torch.ones(max_modes, device=device) * 0.95
+        )
+        self.register_buffer(
+            'omega_i', torch.ones(max_modes, device=device) * 1.0
+        )
+        self.register_buffer('phase', torch.zeros(max_modes, device=device))
         
         # Buffers
         self.register_buffer('lambda_W', torch.tensor(1.0, device=device))
@@ -82,9 +89,14 @@ class StaticPseudoModeMemory(nn.Module):
             
             # Initialize other parameters for active modes
             self.w.data[:init_modes] = 1.0 / init_modes
-            self.lambda_i.data[:init_modes] = 1.0
-            self.rho_i.data[:init_modes] = 1.0
-            self.eta_i.data[:init_modes] = 1.0
+            self.lambda_i[:init_modes] = 1.0
+            self.gamma_i[:init_modes] = 0.95  # decay rate
+            self.omega_i[:init_modes] = 1.0   # oscillation freq
+            # Phase initialization with 2π range
+            self.phase[:init_modes] = (
+                torch.rand(init_modes, device=self.mu.device) * 2 * 3.14159
+            )
+            # INVARIANT: Σ occupancy = 1.0
             self.occupancy[:init_modes] = 1.0 / init_modes
             
             if self.use_predictive:
@@ -180,7 +192,7 @@ class StaticPseudoModeMemory(nn.Module):
         self.last_batch_size = latent.shape[0]
 
     def apply_explicit_updates(self):
-        """Apply all non-gradient based updates"""
+        """Apply all non-gradient based updates with mass conservation"""
         if not hasattr(self, 'last_latent'):
             return
         
@@ -195,8 +207,26 @@ class StaticPseudoModeMemory(nn.Module):
         if run_structural and self.n_active_modes > 1:
             self._apply_structural_updates()
         
+        # CRITICAL: Enforce occupancy mass invariant (Σ = 1.0)
+        self._normalize_occupancy()
+        
         # Clear stored data
         self._clear_stored_data()
+    
+    def _normalize_occupancy(self):
+        """INVARIANT ENFORCER: Ensure Σ occupancy[active] = 1.0"""
+        with torch.no_grad():
+            if self.n_active_modes == 0:
+                return
+            
+            total_occ = self.occupancy[self.active_mask].sum()
+            if total_occ > 1e-8:
+                self.occupancy[self.active_mask] = (
+                    self.occupancy[self.active_mask] / total_occ
+                )
+            else:
+                # Fallback: equal distribution
+                self.occupancy[self.active_mask] = 1.0 / self.n_active_modes
 
     def _update_importance_occupancy(self):
         """Update importance and occupancy EMAs"""
@@ -216,17 +246,13 @@ class StaticPseudoModeMemory(nn.Module):
             )
             self.occupancy[active_mask] = new_occupancy
             
-            # Update importance based on reconstruction quality and novelty
+            # Update importance based on reconstruction quality
             R_t = self._compute_R_t()
             if R_t is not None:
-                importance_update = (
-                    self.rho_i.data[active_mask] *
-                    self.eta_i.data[active_mask] *
-                    R_t
-                )
-                self.lambda_i.data[active_mask] = (
-                    self.lambda_i.data[active_mask] * self.importance_decay +
-                    (1 - self.importance_decay) * importance_update
+                self.lambda_i[active_mask] = torch.clamp(
+                    self.lambda_i[active_mask] * self.importance_decay +
+                    (1 - self.importance_decay) * R_t,
+                    min=0.0  # Non-negative constraint
                 )
 
     def _compute_R_t(self) -> Optional[torch.Tensor]:
@@ -330,21 +356,22 @@ class StaticPseudoModeMemory(nn.Module):
         
         # Merge other parameters
         self.w.data[idx_i] = self.w.data[idx_i] + self.w.data[idx_j]
-        self.lambda_i.data[idx_i] = (
-            occ_i * self.lambda_i.data[idx_i] +
-            occ_j * self.lambda_i.data[idx_j]
+        self.lambda_i[idx_i] = (
+            occ_i * self.lambda_i[idx_i] + occ_j * self.lambda_i[idx_j]
         ) / total_occ
-        self.rho_i.data[idx_i] = (
-            occ_i * self.rho_i.data[idx_i] +
-            occ_j * self.rho_i.data[idx_j]
+        self.gamma_i[idx_i] = (
+            occ_i * self.gamma_i[idx_i] + occ_j * self.gamma_i[idx_j]
         ) / total_occ
-        self.eta_i.data[idx_i] = (
-            occ_i * self.eta_i.data[idx_i] +
-            occ_j * self.eta_i.data[idx_j]
+        self.omega_i[idx_i] = (
+            occ_i * self.omega_i[idx_i] + occ_j * self.omega_i[idx_j]
+        ) / total_occ
+        self.phase[idx_i] = (
+            occ_i * self.phase[idx_i] + occ_j * self.phase[idx_j]
         ) / total_occ
         
-        # Preserve occupancy mass
+        # MASS CONSERVATION: preserve total occupancy
         self.occupancy[idx_i] = total_occ
+        self.occupancy[idx_j] = 0.0  # will be pruned
         
         if self.use_predictive:
             self.F.data[idx_i] = (
@@ -395,13 +422,19 @@ class StaticPseudoModeMemory(nn.Module):
         noise = torch.randn_like(self.mu.data[original_idx]) * 0.1
         self.mu.data[new_idx] = self.mu.data[original_idx] + noise
         
-        # Initialize parameters for new mode
+        # Initialize parameters for new mode - HALVE MASS
         self.w.data[new_idx] = self.w.data[original_idx] / 2
         self.w.data[original_idx] = self.w.data[original_idx] / 2
         
-        self.lambda_i.data[new_idx] = self.lambda_i.data[original_idx]
-        self.rho_i.data[new_idx] = self.rho_i.data[original_idx]
-        self.eta_i.data[new_idx] = self.eta_i.data[original_idx]
+        self.lambda_i[new_idx] = self.lambda_i[original_idx]
+        self.gamma_i[new_idx] = self.gamma_i[original_idx]
+        self.omega_i[new_idx] = self.omega_i[original_idx]
+        self.phase[new_idx] = (
+            self.phase[original_idx] +
+            torch.rand(1, device=self.mu.device).item() * 3.14159
+        )
+        
+        # MASS CONSERVATION: halve occupancy
         self.occupancy[new_idx] = self.occupancy[original_idx] / 2
         self.occupancy[original_idx] = self.occupancy[original_idx] / 2
         
@@ -426,6 +459,7 @@ class StaticPseudoModeMemory(nn.Module):
             for candidate_idx in torch.where(prune_candidates)[0]:
                 original_idx = active_indices[candidate_idx]
                 active_mask[original_idx] = False
+                self.occupancy[original_idx] = 0.0  # release mass
                 self.logger.info(f"Pruned mode {original_idx}")
             
             self.active_mask.copy_(active_mask)
