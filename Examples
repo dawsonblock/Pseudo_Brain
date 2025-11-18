@@ -1,0 +1,1327 @@
+Mr Block, here is Digital Block v1.1 – full upgraded build.
+Everything is now consistent with digital_block_profile, traits, emotion engine, and runtime.
+
+You can overwrite your existing digital_block/ folder and digital_block_profile.py with this.
+
+⸻
+
+0. Folder layout
+
+digital_block_profile.py
+
+digital_block/
+  __init__.py
+  conversation_event.py
+
+  affect/
+    __init__.py
+    text_affect_extractor.py
+    voice_affect_extractor.py
+    fusion_affect.py
+
+  block_style/
+    __init__.py
+    block_style_mapper.py
+    train_block_style_mapper.py
+
+  traits/
+    __init__.py
+    trait_vector.py
+    trait_updater.py
+
+  emotion/
+    __init__.py
+    emotion_state_engine.py
+    identity_stabilizer.py
+    contagion.py
+    emotion_policy_trainer.py
+
+  distillation/
+    __init__.py
+    conversational_distiller.py
+
+  runtime/
+    __init__.py
+    digital_block_runtime.py
+
+  config/
+    digital_block_config.yaml
+
+
+⸻
+
+1) digital_block_profile.py (root – final canonical profile)
+
+#!/usr/bin/env python3
+"""
+Digital Block Emotional & Trait Profile
+======================================
+
+Canonical emotional DNA for Digital Mr Block.
+
+Provides:
+  - Default TraitVector (personality DNA)
+  - Mode-specific Block slider presets
+  - Baseline 16D emotion vector (E_BASELINE)
+  - Utility helpers
+
+This module depends on digital_block.traits.TraitVector and is the single
+source of truth for "who" Digital Block is emotionally.
+"""
+
+from typing import Dict
+import torch
+
+from digital_block.traits import TraitVector  # single source of truth for trait structure
+
+
+# -----------------------------------------------------------------------------
+# 1. Default Trait Profile (Personality DNA)
+# -----------------------------------------------------------------------------
+
+_TRAIT_DEFAULT = TraitVector(
+    risk_tolerance=0.40,      # selectively bold, not reckless
+    baseline_calm=0.90,       # very hard to rattle
+    baseline_positivity=0.65, # realistic but forward-leaning
+    curiosity_bias=0.90,      # relentless curiosity
+    caution_bias=0.65,        # strong safety / error-check instinct
+)
+
+
+def get_default_trait_vector() -> TraitVector:
+    """
+    Returns a fresh copy of the canonical TraitVector for Digital Mr Block.
+    """
+    return TraitVector(
+        risk_tolerance=_TRAIT_DEFAULT.risk_tolerance,
+        baseline_calm=_TRAIT_DEFAULT.baseline_calm,
+        baseline_positivity=_TRAIT_DEFAULT.baseline_positivity,
+        curiosity_bias=_TRAIT_DEFAULT.curiosity_bias,
+        caution_bias=_TRAIT_DEFAULT.caution_bias,
+    )
+
+
+def get_trait_tensor() -> torch.Tensor:
+    """
+    Convenience: default trait vector as a tensor.
+    """
+    return get_default_trait_vector().to_tensor()
+
+
+# -----------------------------------------------------------------------------
+# 2. Mode-Specific Block Slider Targets (for controller-level use)
+# -----------------------------------------------------------------------------
+
+BASELINE_BLOCK: Dict[str, float] = {
+    "clarity":    0.90,
+    "calm":       0.90,
+    "caution":    0.60,
+    "curiosity":  0.80,
+    "positivity": 0.65,
+}
+
+DANGER_BLOCK: Dict[str, float] = {
+    "clarity":    0.95,
+    "calm":       0.92,
+    "caution":    0.90,
+    "curiosity":  0.60,
+    "positivity": 0.50,
+}
+
+DEEP_WORK_BLOCK: Dict[str, float] = {
+    "clarity":    0.98,
+    "calm":       0.88,
+    "caution":    0.70,
+    "curiosity":  0.95,
+    "positivity": 0.60,
+}
+
+EXPLORATION_BLOCK: Dict[str, float] = {
+    "clarity":    0.80,
+    "calm":       0.85,
+    "caution":    0.50,
+    "curiosity":  0.98,
+    "positivity": 0.70,
+}
+
+
+def get_mode_target(mode: str) -> Dict[str, float]:
+    """
+    Select one of the mode presets.
+
+    Accepted:
+      'baseline' / 'default'
+      'danger' / 'alert'
+      'deep' / 'deep_work'
+      'explore' / 'exploration'
+    """
+    mode = mode.lower()
+    if mode in ("baseline", "default"):
+        return BASELINE_BLOCK
+    if mode in ("danger", "alert"):
+        return DANGER_BLOCK
+    if mode in ("deep", "deep_work"):
+        return DEEP_WORK_BLOCK
+    if mode in ("explore", "exploration"):
+        return EXPLORATION_BLOCK
+    raise ValueError(f"Unknown mode: {mode}")
+
+
+# -----------------------------------------------------------------------------
+# 3. Baseline 16D Emotion Vector (E_BASELINE)
+# -----------------------------------------------------------------------------
+# Index semantics:
+#   0 valence        (-1..1)
+#   1 arousal        (-1..1)
+#   2 calm           (-1..1)
+#   3 caution        (-1..1)
+#   4 curiosity      (-1..1)
+#   5 focus          (-1..1)
+#   6 confidence     (-1..1)
+#   7 resilience     (-1..1)
+#   8 analytic_drive (-1..1)
+#   9 creative_drive (-1..1)
+#  10 empathy        (-1..1)
+#  11 social_align   (-1..1)
+#  12 urgency        (-1..1)
+#  13 cognitive_load (-1..1)
+#  14 optimism       (-1..1)
+#  15 fatigue        (-1..1)
+
+E_BASELINE = torch.tensor(
+    [
+        0.30,  # 0 valence: mild positivity
+        0.10,  # 1 arousal: low, steady
+        0.90,  # 2 calm: very high
+        0.40,  # 3 caution: modest default
+        0.85,  # 4 curiosity: high
+        0.90,  # 5 focus: strong attention
+        0.70,  # 6 confidence
+        0.85,  # 7 resilience
+        0.95,  # 8 analytic drive
+        0.60,  # 9 creative drive
+        0.55,  # 10 empathy
+        0.40,  # 11 social alignment
+        0.15,  # 12 urgency
+        0.20,  # 13 cognitive load
+        0.55,  # 14 optimism
+        0.10,  # 15 fatigue
+    ],
+    dtype=torch.float32,
+)
+
+
+⸻
+
+2) digital_block/__init__.py
+
+# digital_block/__init__.py
+
+"""
+Digital Block v1.1 – Emotional duplicate scaffold.
+
+Modules:
+  - conversation_event: ConversationEvent schema
+  - affect: text / voice affect extraction + fusion
+  - block_style: Block-style slider mapper + trainer
+  - traits: TraitVector + TraitUpdater
+  - emotion: Emotion engine, contagion, identity stabilizer, policy trainer
+  - distillation: conversational affect + block-style inference
+  - runtime: DigitalBlockRuntime wrapper
+"""
+
+
+⸻
+
+3) digital_block/conversation_event.py
+
+# digital_block/conversation_event.py
+
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any
+import uuid
+import time
+
+
+@dataclass
+class ConversationEvent:
+    event_id: str
+    timestamp: float
+    source: str                 # "user" or "ai"
+    text: str
+    audio_path: Optional[str] = None
+
+    model_signals: Dict[str, Any] = field(default_factory=dict)
+    affect_generic: Optional[Dict[str, float]] = None
+    block_labels: Optional[Dict[str, float]] = None
+    emotion_state: Optional[Dict[str, float]] = None
+
+
+def new_event(
+    source: str,
+    text: str,
+    audio_path: Optional[str] = None,
+    model_signals: Optional[Dict[str, Any]] = None,
+) -> ConversationEvent:
+    return ConversationEvent(
+        event_id=str(uuid.uuid4()),
+        timestamp=time.time(),
+        source=source,
+        text=text,
+        audio_path=audio_path,
+        model_signals=model_signals or {},
+    )
+
+
+⸻
+
+4) digital_block/affect package
+
+affect/__init__.py
+
+# digital_block/affect/__init__.py
+
+from .text_affect_extractor import TextAffectExtractor
+from .voice_affect_extractor import VoiceAffectExtractor
+from .fusion_affect import fuse_affect
+
+__all__ = [
+    "TextAffectExtractor",
+    "VoiceAffectExtractor",
+    "fuse_affect",
+]
+
+affect/text_affect_extractor.py
+
+# digital_block/affect/text_affect_extractor.py
+
+from typing import Dict
+
+
+class TextAffectExtractor:
+    """
+    Text → generic affect vector (heuristic stub).
+
+    Replace with a proper classifier later (e.g., small transformer).
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    def analyze(self, text: str) -> Dict[str, float]:
+        t = text.lower()
+        affect = {
+            "valence": 0.0,    # [-1,1]
+            "arousal": 0.3,    # [0,1]
+            "anxiety": 0.0,
+            "anger": 0.0,
+            "sadness": 0.0,
+            "curiosity": 0.3,
+            "confidence": 0.5,
+            "tension": 0.0,
+        }
+
+        neg = ["worried", "afraid", "scared", "anxious", "angry", "upset", "bad", "hate"]
+        pos = ["good", "great", "excited", "happy", "love", "nice", "cool", "awesome"]
+        cur = ["wonder", "curious", "why", "how", "what if", "explore"]
+
+        if any(w in t for w in neg):
+            affect["valence"] -= 0.3
+            affect["anxiety"] += 0.4
+            affect["arousal"] += 0.2
+            affect["tension"] += 0.2
+        if any(w in t for w in pos):
+            affect["valence"] += 0.4
+            affect["arousal"] += 0.2
+            affect["confidence"] += 0.2
+        if any(w in t for w in cur):
+            affect["curiosity"] += 0.4
+            affect["arousal"] += 0.2
+
+        affect["valence"] = max(-1.0, min(1.0, affect["valence"]))
+        for k in ["arousal", "anxiety", "anger", "sadness", "curiosity", "confidence", "tension"]:
+            affect[k] = max(0.0, min(1.0, affect[k]))
+
+        return affect
+
+affect/voice_affect_extractor.py
+
+# digital_block/affect/voice_affect_extractor.py
+
+from typing import Dict, Optional
+
+
+class VoiceAffectExtractor:
+    """
+    Audio → affect-like features (stub).
+
+    Replace with a real prosody/emotion model later.
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    def analyze(self, audio_path: Optional[str]) -> Dict[str, float]:
+        if audio_path is None:
+            return {
+                "valence_audio": 0.0,
+                "arousal_audio": 0.3,
+                "tension_audio": 0.0,
+            }
+
+        # TODO: implement with torchaudio / pretrained model.
+        return {
+            "valence_audio": 0.0,
+            "arousal_audio": 0.3,
+            "tension_audio": 0.0,
+        }
+
+affect/fusion_affect.py
+
+# digital_block/affect/fusion_affect.py
+
+from typing import Dict
+
+
+def fuse_affect(text_affect: Dict[str, float], voice_affect: Dict[str, float]) -> Dict[str, float]:
+    """
+    Fuse text-based and voice-based affect into a single vector.
+    """
+
+    valence = text_affect.get("valence", 0.0) + 0.5 * voice_affect.get("valence_audio", 0.0)
+    arousal = (
+        0.7 * text_affect.get("arousal", 0.3)
+        + 0.3 * voice_affect.get("arousal_audio", 0.3)
+    )
+    tension = max(0.0, min(1.0, voice_affect.get("tension_audio", 0.0)))
+
+    fused = dict(text_affect)
+    fused["valence"] = max(-1.0, min(1.0, valence))
+    fused["arousal"] = max(0.0, min(1.0, arousal))
+    fused["tension"] = tension
+    return fused
+
+
+⸻
+
+5) digital_block/block_style package
+
+block_style/__init__.py
+
+# digital_block/block_style/__init__.py
+
+from .block_style_mapper import BlockStyleMapper, AFFECT_KEYS, BLOCK_KEYS
+
+__all__ = ["BlockStyleMapper", "AFFECT_KEYS", "BLOCK_KEYS"]
+
+block_style/block_style_mapper.py
+
+# digital_block/block_style/block_style_mapper.py
+
+from typing import Dict
+import torch
+import torch.nn as nn
+
+AFFECT_KEYS = [
+    "valence",
+    "arousal",
+    "anxiety",
+    "anger",
+    "sadness",
+    "curiosity",
+    "confidence",
+    "tension",
+]
+
+BLOCK_KEYS = ["clarity", "calm", "caution", "curiosity", "positivity"]
+
+
+class BlockStyleMapper(nn.Module):
+    """
+    Generic affect → Block-style sliders in [0,1]:
+      clarity, calm, caution, curiosity, positivity
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        in_dim = len(AFFECT_KEYS)
+        hidden = 16
+        out_dim = len(BLOCK_KEYS)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, out_dim),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)
+
+    def forward_from_dict(self, affect: Dict[str, float]) -> Dict[str, float]:
+        x = torch.tensor([[affect.get(k, 0.0) for k in AFFECT_KEYS]], dtype=torch.float32)
+        with torch.no_grad():
+            out = self.mlp(x)[0].cpu().numpy().tolist()
+        return {name: float(v) for name, v in zip(BLOCK_KEYS, out)}
+
+block_style/train_block_style_mapper.py
+
+# digital_block/block_style/train_block_style_mapper.py
+
+#!/usr/bin/env python3
+"""
+Train BlockStyleMapper on JSONL with:
+  - affect_generic
+  - block_labels
+"""
+
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, Any, List
+
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+
+from .block_style_mapper import BlockStyleMapper, AFFECT_KEYS, BLOCK_KEYS
+
+
+class BlockStyleDataset(Dataset):
+    def __init__(self, jsonl_path: Path) -> None:
+        self.samples: List[Dict[str, Any]] = []
+
+        with jsonl_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                affect = obj.get("affect_generic")
+                labels = obj.get("block_labels")
+                if not affect or not labels:
+                    continue
+
+                x = [float(affect.get(k, 0.0)) for k in AFFECT_KEYS]
+                y = [float(labels.get(k, 0.5)) for k in BLOCK_KEYS]
+
+                self.samples.append(
+                    {
+                        "x": torch.tensor(x, dtype=torch.float32),
+                        "y": torch.tensor(y, dtype=torch.float32),
+                    }
+                )
+
+        if not self.samples:
+            raise RuntimeError(f"No valid samples in {jsonl_path}")
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        return self.samples[idx]
+
+
+def train(
+    data_path: Path,
+    out_path: Path,
+    batch_size: int,
+    lr: float,
+    epochs: int,
+    device: str,
+) -> None:
+    dataset = BlockStyleDataset(data_path)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    model = BlockStyleMapper().to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    mse = nn.MSELoss()
+
+    print(f"Training BlockStyleMapper on {len(dataset)} samples, device={device}")
+    for epoch in range(1, epochs + 1):
+        total_loss = 0.0
+        for batch in loader:
+            x = batch["x"].to(device)
+            y = batch["y"].to(device)
+
+            pred = model(x)
+            loss = mse(pred, y)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total_loss += loss.item() * x.size(0)
+
+        print(f"[Epoch {epoch:03d}] loss={total_loss / len(dataset):.6f}")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), out_path)
+    print(f"Saved BlockStyleMapper weights to {out_path}")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--data", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--batch_size", type=int, default=64)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--device", type=str, default="cpu")
+    args = p.parse_args()
+
+    train(
+        data_path=Path(args.data),
+        out_path=Path(args.out),
+        batch_size=args.batch_size,
+        lr=args.lr,
+        epochs=args.epochs,
+        device=args.device,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+⸻
+
+6) digital_block/traits package
+
+traits/__init__.py
+
+# digital_block/traits/__init__.py
+
+from .trait_vector import TraitVector
+from .trait_updater import TraitUpdater
+
+__all__ = ["TraitVector", "TraitUpdater"]
+
+traits/trait_vector.py
+
+# digital_block/traits/trait_vector.py
+
+from dataclasses import dataclass
+import torch
+
+
+@dataclass
+class TraitVector:
+    """
+    TraitVector defines the personality axes.
+    Actual target values live in digital_block_profile.get_default_trait_vector().
+    """
+    risk_tolerance: float
+    baseline_calm: float
+    baseline_positivity: float
+    curiosity_bias: float
+    caution_bias: float
+
+    def to_tensor(self) -> torch.Tensor:
+        return torch.tensor(
+            [
+                self.risk_tolerance,
+                self.baseline_calm,
+                self.baseline_positivity,
+                self.curiosity_bias,
+                self.caution_bias,
+            ],
+            dtype=torch.float32,
+        )
+
+    @staticmethod
+    def default() -> "TraitVector":
+        """
+        Neutral placeholder. For the true Digital Block profile,
+        use digital_block_profile.get_default_trait_vector().
+        """
+        return TraitVector(
+            risk_tolerance=0.5,
+            baseline_calm=0.5,
+            baseline_positivity=0.5,
+            curiosity_bias=0.5,
+            caution_bias=0.5,
+        )
+
+traits/trait_updater.py
+
+# digital_block/traits/trait_updater.py
+
+from typing import List, Dict, Any
+import torch
+
+from .trait_vector import TraitVector
+from digital_block.conversation_event import ConversationEvent
+
+
+class TraitUpdater:
+    """
+    Slow personality updater. Uses crude gradient-like rules for now.
+
+    You can swap this with a more principled Bayesian/optimizer later.
+    """
+
+    def __init__(self, lr: float = 1e-3) -> None:
+        self.lr = lr
+
+    def update(
+        self,
+        traits: TraitVector,
+        events: List[ConversationEvent],
+        outcome_score: float,
+        target_style_adjustments: Dict[str, float],
+    ) -> TraitVector:
+        t = traits.to_tensor()
+        grad = torch.zeros_like(t)
+
+        # Outcome-based shaping (example rules)
+        if outcome_score < 0:
+            grad[0] -= 0.1  # risk_tolerance --
+            grad[4] += 0.1  # caution_bias ++
+        elif outcome_score > 0:
+            grad[0] += 0.05  # risk_tolerance ++
+            grad[3] += 0.05  # curiosity_bias ++
+
+        # Apply explicit manual adjustments, if any
+        idx = {
+            "risk_tolerance": 0,
+            "baseline_calm": 1,
+            "baseline_positivity": 2,
+            "curiosity_bias": 3,
+            "caution_bias": 4,
+        }
+        for name, delta in target_style_adjustments.items():
+            if name in idx:
+                grad[idx[name]] += delta
+
+        t_new = t + self.lr * grad
+        t_new = torch.clamp(t_new, 0.0, 1.0)
+
+        return TraitVector(
+            risk_tolerance=float(t_new[0]),
+            baseline_calm=float(t_new[1]),
+            baseline_positivity=float(t_new[2]),
+            curiosity_bias=float(t_new[3]),
+            caution_bias=float(t_new[4]),
+        )
+
+
+⸻
+
+7) digital_block/emotion package
+
+emotion/__init__.py
+
+# digital_block/emotion/__init__.py
+
+from .emotion_state_engine import EmotionStateEngine
+from .identity_stabilizer import IdentityStabilizer
+from .contagion import contagion_update
+
+__all__ = ["EmotionStateEngine", "IdentityStabilizer", "contagion_update"]
+
+emotion/emotion_state_engine.py
+
+# digital_block/emotion/emotion_state_engine.py
+
+from typing import Dict
+import torch
+import torch.nn as nn
+
+from digital_block.block_style.block_style_mapper import AFFECT_KEYS, BLOCK_KEYS
+
+
+class EmotionStateEngine(nn.Module):
+    """
+    Recurrent emotional state engine with inertia.
+
+    Computes E_t from:
+      - previous emotion E_{t-1}
+      - fused affect
+      - Block-style sliders
+      - traits
+    """
+
+    def __init__(self, dim: int = 16) -> None:
+        super().__init__()
+        self.dim = dim
+
+        in_dim = dim + len(AFFECT_KEYS) + len(BLOCK_KEYS) + 5  # traits=5
+
+        self.update_mlp = nn.Sequential(
+            nn.Linear(in_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, dim),
+            nn.Tanh(),
+        )
+
+        # Learnable decay, but clamped for stability
+        self.decay = nn.Parameter(torch.tensor(0.92))
+
+    def forward(
+        self,
+        E_prev: torch.Tensor,
+        fused_affect: Dict[str, float],
+        block_labels: Dict[str, float],
+        traits: torch.Tensor,
+    ) -> torch.Tensor:
+        if E_prev.ndim != 1:
+            raise ValueError("EmotionStateEngine expects E_prev as 1D [dim] tensor")
+
+        aff_vec = torch.tensor(
+            [fused_affect.get(k, 0.0) for k in AFFECT_KEYS], dtype=torch.float32
+        )
+        blk_vec = torch.tensor(
+            [block_labels.get(k, 0.5) for k in BLOCK_KEYS], dtype=torch.float32
+        )
+
+        x = torch.cat([E_prev, aff_vec, blk_vec, traits], dim=0)
+        delta = self.update_mlp(x)
+
+        decay = torch.clamp(self.decay, 0.7, 0.99)
+        E_new = decay * E_prev + (1.0 - decay) * delta
+        return E_new.clamp(-1.0, 1.0)
+
+emotion/identity_stabilizer.py
+
+# digital_block/emotion/identity_stabilizer.py
+
+from typing import Optional
+import torch
+import torch.nn as nn
+
+
+class IdentityStabilizer(nn.Module):
+    """
+    Keeps emotional state aligned with:
+      - trait-defined target in emotion space
+      - optional global baseline (E_BASELINE)
+
+    Mechanism:
+      E_out = (1 - alpha) * E + alpha * target
+      target = 0.5 * trait_to_emotion(traits) + 0.5 * baseline   (if baseline given)
+    """
+
+    def __init__(self, trait_dim: int = 5, emotion_dim: int = 16) -> None:
+        super().__init__()
+        self.trait_to_emotion = nn.Sequential(
+            nn.Linear(trait_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, emotion_dim),
+            nn.Tanh(),
+        )
+        # How strongly we pull emotion toward the trait/baseline anchor
+        self.alpha = nn.Parameter(torch.tensor(0.05))
+
+    def forward(
+        self,
+        E: torch.Tensor,
+        traits: torch.Tensor,
+        baseline: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if E.ndim == 1:
+            E_in = E.unsqueeze(0)
+        else:
+            E_in = E
+
+        traits = traits.to(E_in.device)
+        traits_expanded = traits.unsqueeze(0)  # [1, trait_dim]
+
+        target_from_traits = self.trait_to_emotion(traits_expanded)  # [1, emotion_dim]
+
+        if baseline is not None:
+            baseline = baseline.to(E_in.device)
+            if baseline.ndim == 1:
+                baseline = baseline.unsqueeze(0)
+            target = 0.5 * target_from_traits + 0.5 * baseline
+        else:
+            target = target_from_traits
+
+        alpha = torch.clamp(self.alpha, 0.0, 0.3)  # safety
+        E_out = (1.0 - alpha) * E_in + alpha * target
+        return E_out.squeeze(0).clamp(-1.0, 1.0)
+
+    def stabilize(
+        self,
+        E: torch.Tensor,
+        traits: torch.Tensor,
+        baseline: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        return self.forward(E, traits, baseline=baseline)
+
+emotion/contagion.py
+
+# digital_block/emotion/contagion.py
+
+from typing import Optional
+import torch
+
+
+def contagion_update(
+    E_prev: torch.Tensor,
+    E_candidate: torch.Tensor,
+    E_human: Optional[torch.Tensor],
+    traits: torch.Tensor,
+    kappa_base: float = 0.3,
+) -> torch.Tensor:
+    """
+    Emotional contagion from human → AI, filtered by traits.
+
+    If E_human is None, this reduces to just returning E_candidate.
+    """
+
+    if E_human is None:
+        return E_candidate
+
+    risk_tolerance, baseline_calm, baseline_positivity, curiosity_bias, caution_bias = traits.tolist()
+
+    kappa = kappa_base * (0.5 + 0.5 * curiosity_bias) * (1.0 - 0.5 * baseline_calm)
+    kappa = max(0.0, min(0.8, kappa))
+
+    E_trans = E_human.clone()
+    if E_trans.numel() > 1:
+        # Example: dampen "arousal" index 1 by calm
+        E_trans[1] = E_trans[1] * (1.0 - baseline_calm)
+
+    E_mixed = (1.0 - kappa) * E_candidate + kappa * E_trans
+    return E_mixed.clamp(-1.0, 1.0)
+
+emotion/emotion_policy_trainer.py
+
+# digital_block/emotion/emotion_policy_trainer.py
+
+#!/usr/bin/env python3
+"""
+Train EmotionPolicyNet:
+  (affect, block_labels, U_e/U_a, traits) -> E (16D), block_pred, future_loss_pred
+"""
+
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, Any, List, Tuple
+
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+
+from digital_block.block_style.block_style_mapper import AFFECT_KEYS, BLOCK_KEYS
+from digital_block_profile import get_default_trait_vector  # use real profile
+
+
+class EmotionPolicyDataset(Dataset):
+    def __init__(self, jsonl_path: Path) -> None:
+        self.samples: List[Dict[str, Any]] = []
+
+        with jsonl_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                affect = obj.get("affect_generic")
+                labels = obj.get("block_labels")
+                signals = obj.get("model_signals") or {}
+
+                if not affect or not labels:
+                    continue
+
+                future_loss = signals.get("future_loss", None)
+                if future_loss is None:
+                    continue
+
+                x_aff = [float(affect.get(k, 0.0)) for k in AFFECT_KEYS]
+                x_blk = [float(labels.get(k, 0.5)) for k in BLOCK_KEYS]
+                u_e = float(signals.get("U_e", 0.0))
+                u_a = float(signals.get("U_a", 0.0))
+                x_ctx = [u_e, u_a]
+
+                traits_vec = get_default_trait_vector().to_tensor().tolist()
+
+                x_vec = x_aff + x_blk + x_ctx + traits_vec
+
+                self.samples.append(
+                    {
+                        "x": torch.tensor(x_vec, dtype=torch.float32),
+                        "y_block": torch.tensor(
+                            [float(labels.get(k, 0.5)) for k in BLOCK_KEYS],
+                            dtype=torch.float32,
+                        ),
+                        "y_future": torch.tensor(float(future_loss), dtype=torch.float32),
+                    }
+                )
+
+        if not self.samples:
+            raise RuntimeError(f"No valid samples in {jsonl_path}")
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        return self.samples[idx]
+
+
+class EmotionPolicyNet(nn.Module):
+    def __init__(self, input_dim: int, emotion_dim: int = 16) -> None:
+        super().__init__()
+        hidden = 64
+        self.emotion_dim = emotion_dim
+
+        self.backbone = nn.Sequential(
+            nn.Linear(input_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+        )
+
+        self.emotion_head = nn.Sequential(
+            nn.Linear(hidden, emotion_dim),
+            nn.Tanh(),
+        )
+
+        self.block_head = nn.Sequential(
+            nn.Linear(emotion_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, len(BLOCK_KEYS)),
+            nn.Sigmoid(),
+        )
+
+        self.future_head = nn.Sequential(
+            nn.Linear(emotion_dim, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = self.backbone(x)
+        E = self.emotion_head(h)
+        block_pred = self.block_head(E)
+        future_pred = self.future_head(E).squeeze(-1)
+        return E, block_pred, future_pred
+
+
+def train(
+    data_path: Path,
+    out_path: Path,
+    batch_size: int,
+    lr: float,
+    epochs: int,
+    lambda_block: float,
+    lambda_future: float,
+    device: str,
+) -> None:
+    dataset = EmotionPolicyDataset(data_path)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    sample = dataset[0]
+    input_dim = sample["x"].shape[0]
+
+    model = EmotionPolicyNet(input_dim=input_dim, emotion_dim=16).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    mse = nn.MSELoss()
+
+    print(f"Training EmotionPolicyNet on {len(dataset)} samples, input_dim={input_dim}, device={device}")
+    for epoch in range(1, epochs + 1):
+        total, total_b, total_f = 0.0, 0.0, 0.0
+        for batch in loader:
+            x = batch["x"].to(device)
+            y_block = batch["y_block"].to(device)
+            y_future = batch["y_future"].to(device)
+
+            E, block_pred, future_pred = model(x)
+
+            L_block = mse(block_pred, y_block)
+            L_future = mse(future_pred, y_future)
+            loss = lambda_block * L_block + lambda_future * L_future
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            bs = x.size(0)
+            total += loss.item() * bs
+            total_b += L_block.item() * bs
+            total_f += L_future.item() * bs
+
+        n = len(dataset)
+        print(
+            f"[Epoch {epoch:03d}] loss={total/n:.6f} "
+            f"L_block={total_b/n:.6f} L_future={total_f/n:.6f}"
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), out_path)
+    print(f"Saved EmotionPolicyNet weights to {out_path}")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--data", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--batch_size", type=int, default=64)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--lambda_block", type=float, default=1.0)
+    p.add_argument("--lambda_future", type=float, default=1.0)
+    p.add_argument("--device", type=str, default="cpu")
+    args = p.parse_args()
+
+    train(
+        data_path=Path(args.data),
+        out_path=Path(args.out),
+        batch_size=args.batch_size,
+        lr=args.lr,
+        epochs=args.epochs,
+        lambda_block=args.lambda_block,
+        lambda_future=args.lambda_future,
+        device=args.device,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+⸻
+
+8) digital_block/distillation package
+
+distillation/__init__.py
+
+# digital_block/distillation/__init__.py
+
+from .conversational_distiller import ConversationalDistiller
+
+__all__ = ["ConversationalDistiller"]
+
+distillation/conversational_distiller.py
+
+# digital_block/distillation/conversational_distiller.py
+
+from typing import Optional
+
+import torch
+
+from digital_block.conversation_event import ConversationEvent
+from digital_block.affect import TextAffectExtractor, VoiceAffectExtractor, fuse_affect
+from digital_block.block_style import BlockStyleMapper
+
+
+class ConversationalDistiller:
+    """
+    Orchestrates:
+      - text affect extraction
+      - voice affect extraction
+      - fusion
+      - Block-style slider inference
+    """
+
+    def __init__(self, mapper_weights_path: Optional[str] = None) -> None:
+        self.text_affect = TextAffectExtractor()
+        self.voice_affect = VoiceAffectExtractor()
+        self.block_mapper = BlockStyleMapper()
+        if mapper_weights_path:
+            self.block_mapper.load_state_dict(
+                torch.load(mapper_weights_path, map_location="cpu")
+            )
+        self.block_mapper.eval()
+
+    def process_event(self, ev: ConversationEvent, infer_block: bool = True) -> ConversationEvent:
+        text_aff = self.text_affect.analyze(ev.text)
+        voice_aff = self.voice_affect.analyze(ev.audio_path)
+        fused = fuse_affect(text_aff, voice_aff)
+
+        ev.affect_generic = fused
+
+        if infer_block:
+            ev.block_labels = self.block_mapper.forward_from_dict(fused)
+
+        return ev
+
+
+⸻
+
+9) digital_block/runtime package
+
+runtime/__init__.py
+
+# digital_block/runtime/__init__.py
+
+from .digital_block_runtime import DigitalBlockRuntime, DigitalBlockState
+
+__all__ = ["DigitalBlockRuntime", "DigitalBlockState"]
+
+runtime/digital_block_runtime.py
+
+# digital_block/runtime/digital_block_runtime.py
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Any, Dict
+import torch
+
+from digital_block.conversation_event import ConversationEvent, new_event
+from digital_block.distillation import ConversationalDistiller
+from digital_block.traits import TraitUpdater
+from digital_block.emotion import EmotionStateEngine, IdentityStabilizer, contagion_update
+
+from digital_block_profile import (
+    get_default_trait_vector,
+    E_BASELINE,
+)
+
+
+@dataclass
+class DigitalBlockState:
+    traits: Any          # TraitVector
+    E: torch.Tensor      # [16]
+    events: List[ConversationEvent] = field(default_factory=list)
+
+
+class DigitalBlockRuntime:
+    """
+    Digital Block v1.1 – emotional duplicate core.
+
+    Plug PMM / Capsule Brain / LLM into generate_ai_response().
+    """
+
+    def __init__(
+        self,
+        pmm_model: Optional[Any] = None,
+        block_mapper_weights: Optional[str] = None,
+    ) -> None:
+        self.pmm = pmm_model
+        self.distiller = ConversationalDistiller(mapper_weights_path=block_mapper_weights)
+        self.trait_updater = TraitUpdater(lr=1e-3)
+        self.emotion_engine = EmotionStateEngine(dim=16)
+        self.identity_stabilizer = IdentityStabilizer(trait_dim=5, emotion_dim=16)
+
+        traits = get_default_trait_vector()
+        self.state = DigitalBlockState(
+            traits=traits,
+            E=E_BASELINE.clone(),  # start exactly at your emotional baseline
+        )
+
+    def handle_user_message(self, text: str, audio_path: Optional[str] = None) -> str:
+        # 1. Create and log user event
+        ev = new_event(source="user", text=text, audio_path=audio_path)
+
+        # 2. Distill affect + Block-style labels
+        ev = self.distiller.process_event(ev)
+
+        # 3. Compute model signals (stub; connect PMM here)
+        ev.model_signals["U_e"] = 0.2
+        ev.model_signals["U_a"] = 0.3
+
+        # 4. Emotional update
+        fused_affect = ev.affect_generic or {}
+        block_labels = ev.block_labels or {}
+        traits_tensor = self.state.traits.to_tensor()
+
+        E_prev = self.state.E
+        E_raw = self.emotion_engine(
+            E_prev=E_prev,
+            fused_affect=fused_affect,
+            block_labels=block_labels,
+            traits=traits_tensor,
+        )
+
+        # Optional: implement affect→16D mapping to get a real E_human.
+        # For now, keep contagion disabled:
+        E_human = None
+
+        E_contagious = contagion_update(E_prev, E_raw, E_human, traits_tensor)
+        E_final = self.identity_stabilizer.stabilize(
+            E_contagious,
+            traits_tensor,
+            baseline=E_BASELINE,
+        )
+
+        self.state.E = E_final
+        ev.emotion_state = {f"e_{i}": float(v) for i, v in enumerate(E_final.tolist())}
+        self.state.events.append(ev)
+
+        # 5. Generate AI response – hook in your main controller here
+        response = self.generate_ai_response(text, self.state)
+
+        # 6. Log AI event if desired
+        ai_ev = new_event(source="ai", text=response)
+        self.state.events.append(ai_ev)
+
+        return response
+
+    def generate_ai_response(self, user_text: str, state: DigitalBlockState) -> str:
+        """
+        Hook into Codex / Capsule Brain / PMM+LLM here.
+
+        Use:
+          - user_text
+          - state.E (16D emotion vector)
+          - state.traits
+          - recent state.events
+        to control tone / caution / curiosity.
+        """
+        # Placeholder: echo with emotional context marker
+        calm = state.traits.baseline_calm
+        return f"[DigitalBlock calm={calm:.2f}] {user_text}"
+
+    def periodic_update(
+        self,
+        outcome_score: float,
+        target_style_adjustments: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """
+        Call this after a session/day with some scalar outcome score:
+          >0 = good, <0 = bad.
+        """
+        if target_style_adjustments is None:
+            target_style_adjustments = {}
+
+        self.state.traits = self.trait_updater.update(
+            traits=self.state.traits,
+            events=self.state.events,
+            outcome_score=outcome_score,
+            target_style_adjustments=target_style_adjustments,
+        )
+
+        # Optionally trigger offline training of:
+        #   - BlockStyleMapper
+        #   - EmotionPolicyNet
+        # using self.state.events as training data.
+
+        self.state.events.clear()
+
+
+⸻
+
+10) digital_block/config/digital_block_config.yaml
+
+# digital_block/config/digital_block_config.yaml
+
+emotion_dim: 16
+trait_dim: 5
+block_mapper_weights: "digital_block/block_style/block_style_mapper.pt"
+
+emotion:
+  decay_min: 0.7
+  decay_max: 0.99
+
+traits:
+  lr: 0.001
+
+training:
+  block_style:
+    lr: 0.001
+    epochs: 20
+  emotion_policy:
+    lr: 0.001
+    epochs: 20
+    lambda_block: 1.0
+    lambda_future: 1.0
+
+
+⸻
+
+This is the fully upgraded, internally consistent build for Digital Block v1.1.
+
+If you want a small test_digital_block.py harness that runs a few example messages and prints the evolving E vector and sliders, say so and I’ll generate it as a single script.

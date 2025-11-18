@@ -1,0 +1,22 @@
+# digital_block/config/digital_block_config.yaml
+
+emotion_dim: 16
+trait_dim: 5
+block_mapper_weights: "digital_block/block_style/block_style_mapper.pt"
+
+emotion:
+  decay_min: 0.7
+  decay_max: 0.99
+
+traits:
+  lr: 0.001
+
+training:
+  block_style:
+    lr: 0.001
+    epochs: 20
+  emotion_policy:
+    lr: 0.001
+    epochs: 20
+    lambda_block: 1.0
+    lambda_future: 1.0
