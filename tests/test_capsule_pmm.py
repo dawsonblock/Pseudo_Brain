@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Comprehensive Test Suite for Capsule Brain Pseudo-Memory Module
 ================================================================
@@ -9,6 +10,12 @@ Tests for:
 - Capsule Brain API
 - Gradient safety
 """
+
+import sys
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 import torch.nn.functional as F
