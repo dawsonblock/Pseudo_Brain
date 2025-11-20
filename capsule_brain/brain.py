@@ -14,7 +14,7 @@ from capsule_brain.workspace.frnn_workspace import FRNNWorkspaceController
 from capsule_brain.workspace.pmm_integration import build_pmm_retrieval_fn
 from capsule_brain.capsules import BaseCapsule, SelfModelCapsule, SafetyCapsule
 
-from ppm_new import StaticPseudoModeMemory
+from capsule_brain_integration import CapsuleBrainPMM
 from tonenet import ToneNetRouter
 
 
@@ -35,7 +35,7 @@ class CapsuleBrain:
         self.device = torch.device(cfg.device)
 
         # PMM
-        self.pmm = StaticPseudoModeMemory(
+        self.pmm = CapsuleBrainPMM(
             latent_dim=cfg.latent_dim,
             max_modes=cfg.max_modes,
             init_modes=cfg.init_modes,

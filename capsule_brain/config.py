@@ -3,11 +3,12 @@
 Global Configuration for Capsule Brain
 """
 from dataclasses import dataclass
+import torch
 
 
 @dataclass
 class CapsuleBrainConfig:
-    device: str = "cuda"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
     latent_dim: int = 256
     feelings_dim: int = 8
 

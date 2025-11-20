@@ -26,7 +26,7 @@ def build_pmm_retrieval_fn(
 
     def retrieval_hook(x_t: torch.Tensor) -> torch.Tensor:
         query = x_t[:, :latent_dim]
-        retrieved = pmm.retrieve(query)
-        return retrieved
+        reconstruction, components = pmm.retrieve(query)
+        return reconstruction
 
     return retrieval_hook

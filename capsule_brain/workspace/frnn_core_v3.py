@@ -77,8 +77,9 @@ class FRNNCore_v3(nn.Module):
 
         # Output readout network
         if cfg.attention_bank_in_readout and cfg.bank_size > 0:
+            # Readout input is [current_memory, bank_context], both memory_dim
             self.readout = nn.Sequential(
-                nn.Linear(cfg.memory_dim + cfg.bank_size, cfg.hidden_dim),
+                nn.Linear(cfg.memory_dim * 2, cfg.hidden_dim),
                 nn.SiLU(),
                 nn.Linear(cfg.hidden_dim, cfg.output_dim)
             )
